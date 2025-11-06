@@ -1,9 +1,39 @@
 use secrecy::{ExposeSecret, Secret};
 
+#[derive(Debug, PartialEq)]
+pub enum Enviroment {
+    Local,
+    Production,
+}
+
+impl Enviroment {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Enviroment::Local => "local",
+            Enviroment::Production => "production",
+        }
+    }
+}
+
+impl TryFrom<String> for Enviroment {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.to_lowercase().as_str() {
+            "local" => Ok(Self::Local),
+            "production" => Ok(Self::Production),
+            other => Err(format!(
+                "{} is not supported enviroment. use either local or enviroment",
+                other
+            )),
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
-    pub application_port: u16,
+    pub application: ApplicationSettings,
 }
 
 #[derive(serde::Deserialize)]
@@ -15,10 +45,28 @@ pub struct DatabaseSettings {
     pub database_name: String,
 }
 
+#[derive(serde::Deserialize)]
+pub struct ApplicationSettings {
+    pub port: u16,
+    pub host: String,
+}
+
 pub fn get_configuration() -> Result<Settings, config::ConfigError> {
     let mut setting = config::Config::default();
 
-    setting.merge(config::File::with_name("configuration"))?;
+    let base_path = std::env::current_dir().expect("Failed to determinate current directory");
+    let configuration_directory = base_path.join("configuration");
+
+    setting.merge(config::File::from(configuration_directory.join("base")).required(true))?;
+
+    let enviroment: Enviroment = std::env::var("APP_ENVIROMENT")
+        .unwrap_or_else(|_| "local".into())
+        .try_into()
+        .expect("Failed to parse APP_ENVIROMENT");
+
+    setting.merge(
+        config::File::from(configuration_directory.join(enviroment.as_str())).required(true),
+    )?;
 
     setting.try_into()
 }
