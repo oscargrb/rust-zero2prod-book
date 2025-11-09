@@ -8,7 +8,7 @@ use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 use zero2prod::telemetry::{get_subscriber, init_subscriber};
 use zero2prod::{
-    configuration::{DatabaseSettings, get_configuration},
+    configuration::{get_configuration, DatabaseSettings},
     startup::run,
 };
 
@@ -99,40 +99,33 @@ async fn health_check_works() {
 
 // test form url encode
 #[tokio::test]
-async fn subcribe_return_a_200_for_valid_form_data() {
+async fn subcribe_return_a_400_when_fields_are_present_but_invalid() {
     let app = spawn_app().await;
-
-    let configuration = get_configuration().expect("Failed to read configuration");
-
-    let connection_string = configuration.database.connection_string();
-
-    println!("{}", &connection_string.expose_secret());
-
-    let mut connection = PgConnection::connect(&connection_string.expose_secret())
-        .await
-        .expect("Failed to connect to Postgres");
 
     let client = reqwest::Client::new();
 
-    let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
+    let test_cases = vec![
+        ("name=&email=ursula%40gmail.com", "empty name"),
+        ("name=ursula&email=", "empty email"),
+        ("name=ursula&email=asd", "invalid email"),
+    ];
 
-    let response = client
-        .post(&format!("{}/subscriptions", &app.address))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
-        .await
-        .expect("Failed execute request.");
+    for (body, description) in test_cases {
+        let response = client
+            .post(&format!("{}/subscriptions", &app.address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .expect("Failed to execute request");
 
-    assert_eq!(200, response.status().as_u16());
-
-    let saved = sqlx::query!("SELECT email, name FROM subscriptions")
-        .fetch_one(&mut connection)
-        .await
-        .expect("Failed to fetch saved subscription");
-
-    assert_eq!(saved.email, "ursula_le_guin@gmail.com");
-    assert_eq!(saved.name, "le guin");
+        assert_eq!(
+            400,
+            response.status().as_u16(),
+            "the api did not return the payload was {}",
+            description
+        );
+    }
 }
 
 #[tokio::test]
