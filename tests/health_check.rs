@@ -6,6 +6,7 @@ use secrecy::ExposeSecret;
 use sqlx::Executor;
 use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
+use zero2prod::email_client::EmailClient;
 use zero2prod::telemetry::{get_subscriber, init_subscriber};
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
@@ -36,6 +37,17 @@ async fn spawn_app() -> TestApp {
 
     let mut configuration = get_configuration().expect("Failed to read configuration");
 
+    let sender_email = configuration
+        .email_client
+        .sender()
+        .expect("Invalid sender email address");
+
+    let email_client = EmailClient::new(
+        configuration.email_client.base_url,
+        sender_email,
+        configuration.email_client.authorization_token,
+    );
+
     configuration.database.database_name = Uuid::new_v4().to_string();
 
     let connection_pool = configure_database(&configuration.database).await;
@@ -46,7 +58,7 @@ async fn spawn_app() -> TestApp {
 
     let address = format!("http://127.0.0.1:{}", port);
 
-    let server = run(listener, connection_pool.clone())
+    let server = run(listener, connection_pool.clone(), email_client)
         .await
         .expect("Failed to bind address");
 
