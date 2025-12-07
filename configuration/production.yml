@@ -3,3 +3,5 @@ application:
 email_client:
   base_url: "https://api.postmarkapp.com"
   sender_email: "grondon@poolso.com"
+database:
+  require_ssl: false

@@ -4,7 +4,7 @@ use std::{io::stdout, net::TcpListener};
 use zero2prod::{
     configuration::get_configuration,
     email_client::EmailClient,
-    startup::run,
+    startup::{run, Application},
     telemetry::{get_subscriber, init_subscriber},
 };
 
@@ -12,12 +12,15 @@ use zero2prod::{
 async fn main() -> std::io::Result<()> {
     // Log's configuration
     let subscriber = get_subscriber("zero2prod".into(), "info".into(), stdout);
-
     init_subscriber(subscriber);
 
     let configuration = get_configuration().expect("Failed to read configuration");
 
-    let connection_pool = PgPoolOptions::new()
+    let application = Application::build(configuration).await?;
+
+    application.run_until_stopped().await?;
+
+    /* let connection_pool = PgPoolOptions::new()
         .acquire_timeout(std::time::Duration::from_secs(2))
         .connect_lazy(&configuration.database.connection_string().expose_secret())
         .expect("Error");
@@ -50,7 +53,7 @@ async fn main() -> std::io::Result<()> {
 
     let _ = run(listener, connection_pool, email_client)
         .await
-        .expect("Error");
+        .expect("Error"); */
 
     Ok(())
 }

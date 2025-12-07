@@ -1,8 +1,9 @@
 use secrecy::{ExposeSecret, Secret};
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
 
 use crate::domain::SubscriberEmail;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Enviroment {
     Local,
     Production,
@@ -32,7 +33,7 @@ impl TryFrom<String> for Enviroment {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct EmailClientSettings {
     pub base_url: String,
     pub sender_email: String,
@@ -50,23 +51,24 @@ impl EmailClientSettings {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
     pub email_client: EmailClientSettings,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct DatabaseSettings {
     pub username: String,
     pub password: Secret<String>,
     pub port: u16,
     pub host: String,
     pub database_name: String,
+    pub require_ssl: bool,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
@@ -93,24 +95,51 @@ pub fn get_configuration() -> Result<Settings, config::ConfigError> {
 }
 
 impl DatabaseSettings {
-    pub fn connection_string(&self) -> Secret<String> {
-        Secret::new(format!(
+    pub fn without_db(&self) -> PgConnectOptions {
+        /* Secret::new(format!(
             "postgres://{}:{}@{}:{}/{}",
             self.username,
             self.password.expose_secret(),
             self.host,
             self.port,
             self.database_name
-        ))
+        )) */
+        let ssl_mode = if self.require_ssl {
+            PgSslMode::Require
+        } else {
+            PgSslMode::Prefer
+        };
+
+        PgConnectOptions::new()
+            .host(&self.host)
+            .username(&self.username)
+            .password(&self.password.expose_secret())
+            .port(self.port)
     }
 
+    pub fn with_db(&self) -> PgConnectOptions {
+        self.without_db().database(&self.database_name)
+    }
+}
+
+impl Settings {
+    pub fn connection_string(&self) -> Secret<String> {
+        Secret::new(format!(
+            "postgres://{}:{}@{}:{}/{}",
+            self.database.host,
+            self.database.username,
+            self.database.password.expose_secret(),
+            self.database.port,
+            self.database.database_name
+        ))
+    }
     pub fn connection_string_without_db(&self) -> Secret<String> {
         Secret::new(format!(
             "postgres://{}:{}@{}:{}",
-            self.username,
-            self.password.expose_secret(),
-            self.host,
-            self.port
+            self.database.host,
+            self.database.username,
+            self.database.password.expose_secret(),
+            self.database.port
         ))
     }
 }
