@@ -104,7 +104,7 @@ impl DatabaseSettings {
             self.port,
             self.database_name
         )) */
-        let ssl_mode = if self.require_ssl {
+        let _ssl_mode = if self.require_ssl {
             PgSslMode::Require
         } else {
             PgSslMode::Prefer

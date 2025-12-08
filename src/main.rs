@@ -1,10 +1,7 @@
-use secrecy::ExposeSecret;
-use sqlx::postgres::PgPoolOptions;
-use std::{io::stdout, net::TcpListener};
+use std::io::stdout;
 use zero2prod::{
     configuration::get_configuration,
-    email_client::EmailClient,
-    startup::{run, Application},
+    startup::Application,
     telemetry::{get_subscriber, init_subscriber},
 };
 
