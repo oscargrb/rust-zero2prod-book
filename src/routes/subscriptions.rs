@@ -13,6 +13,8 @@ use crate::{
     email_client::EmailClient,
 };
 
+use crate::startup::AplicationBaseUrl;
+
 #[derive(Deserialize)]
 pub struct FormData {
     pub email: String,
@@ -32,7 +34,7 @@ impl TryFrom<FormData> for NewSubscriber {
 
 #[tracing::instrument(
     name= "Adding a new Subscriber",
-    skip(form, pool, email_client),
+    skip(form, pool, email_client, base_url),
     fields(
         subscriber_email = %form.email,
         subscriber_name = %form.name
@@ -43,6 +45,7 @@ pub async fn subscribe(
     form: Form<FormData>,
     pool: web::Data<PgPool>,
     email_client: web::Data<EmailClient>,
+    base_url: web::Data<AplicationBaseUrl>
 ) -> HttpResponse {
     let new_subscriber = match form.0.try_into() {
         Ok(form) => form,
@@ -54,7 +57,7 @@ pub async fn subscribe(
         Err(_) => HttpResponse::InternalServerError().finish(),
     };
 
-    if send_confirmation_email(&email_client, new_subscriber)
+    if send_confirmation_email(&email_client, new_subscriber, &base_url.0)
         .await
         .is_err()
     {
@@ -75,7 +78,7 @@ pub async fn insert_subscriber(
     sqlx::query!(
         r#"
             INSERT INTO subscriptions (id, email, name, subscribed_at, status)
-            VALUES ($1, $2, $3, $4, 'confirmed')
+            VALUES ($1, $2, $3, $4, 'pending_confirmation')
         "#,
         &Uuid::new_v4(),
         new_subscriber.email.as_ref(),
@@ -91,11 +94,16 @@ pub async fn insert_subscriber(
     Ok(())
 }
 
+#[tracing::instrument(
+    name = "Send confirmation email to new subscriber",
+    skip(email_client, new_subscriber)
+)]
 pub async fn send_confirmation_email(
     email_client: &EmailClient,
     new_subscriber: NewSubscriber,
+    base_url: &str
 ) -> Result<(), reqwest::Error> {
-    let confirmation_link = "https://my-api.com/subscriptions/confirm";
+    let confirmation_link = format!("{}/subscriptions/confirm?subscription_token=mytoken", base_url);
 
     let plain_body = format!(
         "Welcome to out newsletter! \n Visit {} to confirm your subscription",

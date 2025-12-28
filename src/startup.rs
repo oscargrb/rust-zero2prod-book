@@ -1,3 +1,4 @@
+use crate::routes::confirm;
 use std::net::TcpListener;
 
 use actix_web::{
@@ -11,7 +12,7 @@ use tracing_actix_web::TracingLogger;
 use crate::{
     configuration::{DatabaseSettings, Settings},
     email_client::EmailClient,
-    routes::{health_check, subscribe, subscriptions},
+    routes::{health_check, subscribe},
 };
 
 pub struct Application {
@@ -44,7 +45,7 @@ impl Application {
 
         let listener = TcpListener::bind(&address)?;
         let port = listener.local_addr().unwrap().port();
-        let server = run(listener, connection_pool, email_client).await?;
+        let server = run(listener, connection_pool, email_client, configuration.application.base_url).await?;
 
         Ok(Self { port, server })
     }
@@ -58,11 +59,16 @@ impl Application {
     }
 }
 
+pub struct AplicationBaseUrl(pub String);
+
 pub async fn run(
     listener: TcpListener,
     db_pool: PgPool,
     email_client: EmailClient,
+    base_url: String
 ) -> Result<Server, std::io::Error> {
+    let base_url = Data::new(AplicationBaseUrl(base_url));
+
     let email_client = Data::new(email_client);
 
     let connection = web::Data::new(db_pool);
@@ -72,8 +78,10 @@ pub async fn run(
             .wrap(TracingLogger::default())
             .route("/health_check", web::get().to(health_check))
             .route("/subscriptions", web::post().to(subscribe))
+            .route("/subscriptions/confirm", web::get().to(confirm))
             .app_data(connection.clone())
             .app_data(email_client.clone())
+            .app_data(base_url.clone())
     })
     .listen(listener)?
     .run();
