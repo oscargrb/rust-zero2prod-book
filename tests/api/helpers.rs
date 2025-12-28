@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use reqwest::Request;
+use secrecy::ExposeSecret;
 use sqlx::Executor;
 use sqlx::{Connection, PgConnection, PgPool};
 use std::io::{sink, stdout};
@@ -32,6 +33,8 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub email_server: MockServer,
     pub port: u16,
+    pub database_name: String,
+    pub db_configuration: DatabaseSettings
 }
 
 impl TestApp {
@@ -74,6 +77,48 @@ impl TestApp {
     }
 }
 
+impl Drop for TestApp {
+    fn drop(&mut self) {
+        // Obtenemos los datos necesarios
+        let db_name = self.database_name.clone();
+        let config = self.db_configuration.clone();
+
+        // Ejecutamos la limpieza en un hilo separado para manejar el async
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                // 1. Conectar a la base de datos por defecto ('postgres') para poder borrar la otra
+                let mut options = sqlx::postgres::PgConnectOptions::new()
+                    .host(&config.host)
+                    .port(config.port)
+                    .username(&config.username)
+                    .password(config.password.expose_secret());
+                
+                let mut connection = PgConnection::connect_with(&options)
+                    .await
+                    .expect("Failed to connect to Postgres for cleanup");
+
+                // 2. Forzar el cierre de conexiones activas (importante: sqlx mantiene pools abiertos)
+                let terminate_query = format!(
+                    r#"SELECT pg_terminate_backend(pid) 
+                       FROM pg_stat_activity 
+                       WHERE datname = '{}' AND pid <> pg_backend_pid()"#,
+                    db_name
+                );
+                let _ = connection.execute(terminate_query.as_str()).await;
+
+                // 3. Borrar la base de datos
+                let drop_query = format!(r#"DROP DATABASE "{}""#, db_name);
+                let _ = connection.execute(drop_query.as_str()).await;
+                
+                println!("Successfully dropped database: {}", db_name);
+            });
+        })
+        .join()
+        .expect("The cleanup thread panicked");
+    }
+}
+
 // launch de app in the background
 pub async fn spawn_app() -> TestApp {
     Lazy::force(&TRACING);
@@ -104,7 +149,9 @@ pub async fn spawn_app() -> TestApp {
         address,
         db_pool: get_connection_pool(&configuration.database),
         email_server,
-        port: application_port
+        port: application_port,
+        database_name: configuration.database.database_name.clone(),
+        db_configuration: configuration.database.clone()
     }
 }
 
